@@ -24,7 +24,7 @@ impl ChunkConfig {
     /// Construct a `ChunkConfig` from a raster [`Dataset`],
     /// reading the size from it. An optional list of bands
     /// may be specified to configure the `block_size`.
-    pub fn for_dataset<I: IntoIterator<Item = isize>>(
+    pub fn for_dataset<I: IntoIterator<Item = usize>>(
         ds: &gdal::Dataset,
         bands: Option<I>,
     ) -> crate::Result<Self> {
@@ -35,7 +35,7 @@ impl ChunkConfig {
         if let Some(bands) = bands {
             for band_idx in bands {
                 let band = ds
-                    .rasterband(band_idx)
+                    .rasterband(band_idx as usize)
                     .with_context(|| format!("unable to open rasterband {}", band_idx))?;
                 cfg = cfg.add_block_size(band.block_size().1);
             }

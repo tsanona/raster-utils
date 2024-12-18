@@ -85,7 +85,7 @@ impl<'a> ChunkReader for RasterBand<'a> {
 
 /// A `ChunkReader` that is `Send`, but not `Sync`. Obtains
 /// a `RasterBand` handle for each read.
-pub struct DatasetReader(pub Dataset, pub isize);
+pub struct DatasetReader(pub Dataset, pub usize);
 
 impl ChunkReader for DatasetReader {
     fn read_into_slice<T>(&self, out: &mut [T], off: RasterOffset, size: RasterDims) -> Result<()>
@@ -100,7 +100,7 @@ impl ChunkReader for DatasetReader {
 /// A `ChunkReader` that is both `Send` and `Sync`. Opens
 /// the dataset for each read. `P` may be set to [ `Path` ]
 /// or a `PathBuf` for a `Send + Sync` reader.
-pub struct RasterPathReader<'a, P: ?Sized>(pub &'a P, pub isize);
+pub struct RasterPathReader<'a, P: ?Sized>(pub &'a P, pub usize);
 
 use std::path::Path;
 impl<'a, P> ChunkReader for RasterPathReader<'a, P>
