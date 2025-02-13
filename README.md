@@ -1,16 +1,10 @@
-[![Documentation](https://docs.rs/rasters/badge.svg)](https://docs.rs/rasters)
+# raster-utils
 
-# raster.rs
+A fork of [raster.rs](https://github.com/AspecScire/rasters.rs).
 
-Library to process GDAL rasters. Provides utilities to
-process large rasters in memory-efficient chunks, as well as
-in parallel. Also provides geometry utilities to align
-rasters with different geo-transform.
+Stripped to just the raster utilities and some small changes in used libs and docs.
 
-Refer the `raster-tools` [README](raster-tools/README.md)
-for description of the associated binary tools.
-
-# License
+## License
 
 Licensed under either of [Apache License, Version
 2.0](//www.apache.org/licenses/LICENSE-2.0) or [MIT

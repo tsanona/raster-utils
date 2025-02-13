@@ -1,8 +1,10 @@
-use super::{mod_ceil, ChunkConfig, ChunkWindow};
+use super::{next_multiple, ChunkConfig, ChunkWindow};
 use std::{iter::*, ops::Range};
 
 impl<'a> IntoIterator for &'a ChunkConfig {
     type Item = ChunkWindow<'a>;
+    // TODO: Chnage to impl instead of Box<dyn ...> when supported.
+    // https://github.com/rust-lang/rust/issues/63063
     type IntoIter = Map<Range<usize>, Box<dyn Fn(usize) -> ChunkWindow<'a> + 'a>>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -12,6 +14,8 @@ impl<'a> IntoIterator for &'a ChunkConfig {
 }
 
 impl ChunkConfig {
+    // TODO: This should not be needed has
+    // builder garantees preconditions are met!
     fn check_preconditions(&self) {
         debug_assert!(
             self.block_size > 0
@@ -28,12 +32,16 @@ impl ChunkConfig {
         }
 
         let mut data_end = (self.start + self.data_height).min(self.end);
+        // TODO: probably also not needed
+        // data_height is non zero and end > start
         debug_assert!(data_end > self.start);
 
         // For the initial chunk, we ensure the load ends at
         // a chunk boundary. This would increase the size of
         // the chunk, but by at most one block.
-        let mut load_end = mod_ceil(data_end + self.padding, self.block_size).min(self.height);
+        let mut load_end = next_multiple(data_end + self.padding, self.block_size).min(self.height);
+        // TODO: probably also not needed
+        // data_end > start and height >= end > start
         debug_assert!(load_end > self.start);
 
         // The whole raster may be too narrow for the given
@@ -52,8 +60,8 @@ impl ChunkConfig {
         }
 
         let count = {
-            let dcount = mod_ceil(self.end - data_end, self.data_height) / self.data_height;
-            let lcount = mod_ceil(self.height - load_end, self.data_height) / self.data_height;
+            let dcount = next_multiple(self.end - data_end, self.data_height) / self.data_height;
+            let lcount = next_multiple(self.height - load_end, self.data_height) / self.data_height;
             dcount.min(lcount)
         } + 1;
         debug_assert!(count == 1 || load_end % self.block_size == 0);
@@ -86,7 +94,7 @@ impl ChunkConfig {
         })
     }
 
-    /// Create an [ `ExactSizeIterator` ] from the configuration.
+    /// Create an [ExactSizeIterator] from the configuration.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = ChunkWindow> + '_ {
         let (count, func) = self.iter_mapper();
         (0..count).map(func)

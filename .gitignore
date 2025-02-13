@@ -1,3 +1,10 @@
+*
+!*/
+
+!.gitignore
+!.github
+!*.rs
+!*.toml
+
+/.*/
 /target
-/.idea
-*.pyc

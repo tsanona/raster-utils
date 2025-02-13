@@ -1,11 +1,8 @@
 use rayon::iter::Map;
-use rayon::prelude::*;
 use rayon::range::Iter;
 
-use super::*;
-
 impl ChunkConfig {
-    /// Create an [ `IndexedParallelIterator` ] from the configuration.
+    /// Create an [`IndexedParallelIterator`] from the configuration.
     ///
     /// This function is only available with the "use-rayon" feature.
     pub fn par_iter(&self) -> impl IndexedParallelIterator<Item = ChunkWindow> {

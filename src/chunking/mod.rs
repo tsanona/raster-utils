@@ -37,71 +37,90 @@
 //! - **Fixed Padding.** Each chunk may additionally use a
 //! fixed number of rows above and below it.
 
-/// Builder to configure chunking. Supports configuring the
-/// following paramaters.
-///
-/// - `width`, `height` - the dimensions of the all the
-/// raster bands to be processed (typically from the same
-/// [`Dataset`]).
-///
-/// - `block_size` - the block size of the bands. For
-/// multi-band data, this is the least common multiple of
-/// the individual block sizes (see [`add_block_size`]).
-///
-/// - `data_height` - the minimum number of rows required in
-/// each chunk of data. Does not include the padding. This
-/// value is always maintained as an integer multiple of
-/// `block_size` for efficiency.
-///
-/// - `padding` - the number of additional rows required on
-/// either size of the data.
-///
-/// - `start`,`end` - the semi-open range (i.e. `start..end`
-/// in the usual notation) to process (not including
-/// padding). The `start` is always at least the `padding`
-/// value.
-///
-/// [`add_block_size`]: ChunkConfig::add_block_size
-/// [`Dataset`]: gdal::Dataset
+mod builder;
+mod iters;
+#[cfg(feature = "use-rayon")]
+mod par_iters;
+
+pub use super::{RasterUtilsError, Result};
+
+/// Config for creating chunks within a raster.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ChunkConfig {
+    /// Width of raster to be chunked.
     width: usize,
+    /// Height of raster to be chunked.
     height: usize,
-
+    /// Size of chunks.
+    ///
+    /// For rasters with multiple bands
+    /// this should be set to the
+    /// least common multiple between
+    /// all "natural" block sizes.
     block_size: usize,
+    /// Minimum number of rows required in
+    /// each chunk of data.
+    /// Does not include the padding.
+    /// This value should be a multiple of
+    /// `block_size` for efficiency.    
     data_height: usize,
+    /// Number of additional rows required on
+    /// either size of the data.
     padding: usize,
-
+    /// Start of processing range.
+    ///
+    /// Should be larger or equal to `padding`.
     start: usize,
+    /// End of processing range.
     end: usize,
+}
+
+impl ChunkConfig {
+    pub fn width(&self) -> usize {
+        self.width
+    }
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    pub fn block_size(&self) -> usize {
+        self.block_size
+    }
+    pub fn data_height(&self) -> usize {
+        self.data_height
+    }
+    pub fn padding(&self) -> usize {
+        self.padding
+    }
+
+    pub fn start(&self) -> usize {
+        self.start
+    }
+    pub fn end(&self) -> usize {
+        self.end
+    }
 }
 
 /// The type of item produced by the iterations. Consists
 /// of:
 ///
-/// 1. reference to the underlying `ChunkConfig`
+/// 0. reference to the underlying `ChunkConfig`
 /// 1. the start index of this chunk
-/// 1. the number of rows (incl. padding) for this chunk
+/// 2. the number of rows (incl. padding) for this chunk
 pub type ChunkWindow<'a> = (&'a ChunkConfig, usize, usize);
 
-mod builder;
-mod iters;
-
-#[cfg(feature = "use-rayon")]
-mod par_iters;
-
 #[inline]
-fn mod_ceil(num: usize, m: usize) -> usize {
-    let rem = num % m;
-    if rem == 0 {
-        num
-    } else {
-        num + (m - rem)
-    }
+/// Find smallest multiple of m that is higher then num.
+fn next_multiple(num: usize, m: usize) -> usize {
+    num.div_ceil(m) * m
 }
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroUsize;
+
+    use crate::chunking::builder::ChunkConfigBuilder;
+
     use super::*;
 
     fn debug_cfg(cfg: ChunkConfig) {
@@ -131,22 +150,30 @@ mod tests {
             .expect("couldn't parse CHUNK_CONFIG as [usize; 6]");
 
         debug_cfg(
-            ChunkConfig::with_dims(1, nums[0])
-                .add_block_size(nums[1])
-                .with_min_data_height(nums[2])
-                .with_padding(nums[3])
-                .with_start(nums[4])
-                .with_end(nums[5]),
+            ChunkConfigBuilder::new(
+                NonZeroUsize::new(1).unwrap(),
+                NonZeroUsize::new(nums[0]).unwrap(),
+            )
+            .add_block_size(NonZeroUsize::new(nums[1]).unwrap())
+            .with_data_height(NonZeroUsize::new(nums[2]).unwrap())
+            .with_padding(nums[3])
+            .with_start(nums[4])
+            .with_end(nums[5])
+            .build(),
         );
     }
 
     #[test]
     fn test_simple() {
         check_cfg(
-            ChunkConfig::with_dims(32, 20)
-                .add_block_size(2)
-                .with_padding(7)
-                .with_end(10),
+            ChunkConfigBuilder::new(
+                NonZeroUsize::new(32).unwrap(),
+                NonZeroUsize::new(20).unwrap(),
+            )
+            .add_block_size(NonZeroUsize::new(2).unwrap())
+            .with_padding(7)
+            .with_end(10)
+            .build(),
             vec![(0, 16), (2, 15)],
         )
     }

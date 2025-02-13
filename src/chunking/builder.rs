@@ -1,14 +1,16 @@
-use super::{mod_ceil, ChunkConfig};
+use num::Integer;
+use std::num::NonZeroUsize;
 
-/// Constructors
-impl ChunkConfig {
-    /// Construct a `ChunkConfig` with a given raster size.
-    pub fn with_dims(width: usize, height: usize) -> Self {
-        if width < 1 || height < 1 {
-            panic!("dimensions must both be at least 1");
-        }
-        ChunkConfig {
-            width,
+use super::{next_multiple, ChunkConfig};
+
+/// Builder for [ChunkConfig].
+pub struct ChunkConfigBuilder(ChunkConfig);
+impl ChunkConfigBuilder {
+    /// Create a [ChunkConfigBuilder] with given raster dimmentions.
+    pub fn new(width: NonZeroUsize, height: NonZeroUsize) -> Self {
+        let height = height.get();
+        let default_config = ChunkConfig {
+            width: width.get(),
             height,
 
             block_size: 1,
@@ -17,132 +19,74 @@ impl ChunkConfig {
 
             start: 0,
             end: height,
+        };
+
+        Self(default_config)
+    }
+
+    /// Accumulate `block_size` onto builder.
+    ///
+    /// Compute least common multiple with existing value and replace it.
+    pub fn add_block_size(mut self, block_size: NonZeroUsize) -> Self {
+        let block_size = block_size.get();
+        if self.0.block_size != block_size {
+            self.0.block_size = self.0.block_size.lcm(&block_size);
+            self.adjust_data_height();
         }
-    }
-
-    #[cfg(feature = "gdal")]
-    /// Construct a `ChunkConfig` from a raster [`Dataset`],
-    /// reading the size from it. An optional list of bands
-    /// may be specified to configure the `block_size`.
-    pub fn for_dataset<I: IntoIterator<Item = usize>>(
-        ds: &gdal::Dataset,
-        bands: Option<I>,
-    ) -> crate::Result<Self> {
-        use anyhow::Context;
-        let size = ds.raster_size();
-        let mut cfg = ChunkConfig::with_dims(size.0, size.1);
-
-        if let Some(bands) = bands {
-            for band_idx in bands {
-                let band = ds
-                    .rasterband(band_idx as usize)
-                    .with_context(|| format!("unable to open rasterband {}", band_idx))?;
-                cfg = cfg.add_block_size(band.block_size().1);
-            }
-        }
-
-        Ok(cfg)
-    }
-}
-
-/// Builder methods to configure the parameters
-impl ChunkConfig {
-    /// Accumulate the given `block_size` to the
-    /// configuration by calculating the least common
-    /// multiple with the current value.
-    pub fn add_block_size(mut self, block_size: usize) -> Self {
-        if block_size < 1 {
-            panic!("block_size should be at least 1");
-        }
-        self.block_size = lcm(self.block_size, block_size);
-        self.adjust_block_height();
-        self
-    }
-    /// Set the minimum `data_height` for the chunking. The
-    /// actual `data_height` is the least multiple of
-    /// `block_size` larger or equal to the given value.
-    pub fn with_min_data_height(mut self, min_data_height: usize) -> Self {
-        self.data_height = min_data_height.max(1);
-        self.adjust_block_height();
-        self
-    }
-    /// Set the minimum `data_height` by specifying minimum
-    /// number of data pixels expected in each chunk.
-    pub fn with_min_data_size(self, min_data_size: usize) -> Self {
-        let min_height = (min_data_size + self.width - 1) / self.width;
-        self.with_min_data_height(min_height)
-    }
-
-    /// Set the padding required for each chunk.
-    pub fn with_padding(mut self, padding: usize) -> Self {
-        self.padding = padding;
-        self.adjust_start();
         self
     }
 
-    /// Set the start index of the iteration range.
-    pub fn with_start(mut self, start: usize) -> Self {
-        self.start = start;
-        self.adjust_start();
+    /// Set `data_height` for the chunking.
+    pub fn with_data_height(mut self, data_height: NonZeroUsize) -> Self {
+        self.0.data_height = data_height.get();
+        self.adjust_data_height();
         self
     }
 
-    /// Set the end (not included) index of the iteration
-    /// range.
-    pub fn with_end(mut self, end: usize) -> Self {
-        self.end = end.min(self.height);
-        self
-    }
-
-    /// Ensure that block height is non-zero, and a multiple
-    /// of block size.
+    /// Ensure `data_height` is a multiple of block size.
     #[inline]
-    fn adjust_block_height(&mut self) {
-        self.data_height = mod_ceil(self.data_height, self.block_size);
+    fn adjust_data_height(&mut self) {
+        self.0.data_height = next_multiple(self.0.data_height, self.0.block_size);
     }
 
-    /// Ensure start is always greater than padding
+    /// Set `data_height` based on number of data pixels expected in each chunk.
+    pub fn with_data_size(self, data_size: NonZeroUsize) -> Self {
+        // data_height is zero iff data_size + width = 1
+        // but data_size and width are both NonZeroUsize.
+        let data_height = unsafe {
+            NonZeroUsize::new_unchecked((data_size.get() + self.0.width - 1) / self.0.width)
+        };
+        self.with_data_height(data_height)
+    }
+
+    /// Set `padding` required for each chunk.
+    pub fn with_padding(mut self, padding: usize) -> Self {
+        self.0.padding = padding;
+        self.adjust_start();
+        self
+    }
+
+    /// Set `start` index of the iteration range.
+    pub fn with_start(mut self, start: usize) -> Self {
+        self.0.start = start;
+        self.adjust_start();
+        self
+    }
+
+    /// Ensure `start` is always greater than padding.
     #[inline]
     fn adjust_start(&mut self) {
-        self.start = self.start.max(self.padding);
-    }
-}
-
-/// Getter methods to read the parameters of the config
-impl ChunkConfig {
-    pub fn width(&self) -> usize {
-        self.width
-    }
-    pub fn height(&self) -> usize {
-        self.height
+        self.0.start = self.0.start.max(self.0.padding);
     }
 
-    pub fn block_size(&self) -> usize {
-        self.block_size
-    }
-    pub fn data_height(&self) -> usize {
-        self.data_height
-    }
-    pub fn padding(&self) -> usize {
-        self.padding
+    /// Set `end` index of the iteration range.
+    pub fn with_end(mut self, end: usize) -> Self {
+        self.0.end = end.min(self.0.height);
+        self
     }
 
-    pub fn start(&self) -> usize {
-        self.start
+    /// Build [ChunkConfig]
+    pub fn build(self) -> ChunkConfig {
+        self.0
     }
-    pub fn end(&self) -> usize {
-        self.end
-    }
-}
-
-#[inline]
-fn lcm(a: usize, b: usize) -> usize {
-    a / gcd(a, b) * b
-}
-
-fn gcd(a: usize, b: usize) -> usize {
-    if b == 0 {
-        return a;
-    }
-    gcd(b, a % b)
 }

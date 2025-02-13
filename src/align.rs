@@ -11,51 +11,10 @@
 //! - Extend the above functionality efficiently to work
 //! with chunks of `A`.
 
-use geo::Rect;
-use nalgebra::{Point2, Vector2, Vector3};
+use super::geometry::{as_f64, as_usize, Offset, PixelPixelTransform, Size};
+use geo::{AffineTransform, Coord};
 
-use crate::prelude::{BoundsExt, PixelTransform, RasterDims, RasterWindow};
-#[cfg(feature = "gdal")]
-use crate::prelude::transform_from_dataset;
-
-/// Transforms a `RasterWindow` from one raster to another,
-/// possibly truncating to ensure the output is valid for
-/// the target raster. The rasters are expected to be
-/// axis-aligned.
-///
-/// # Arguments
-///
-/// - win: the `RasterWindow` in the source raster
-/// - t: the `PixelTransform` from source to target raster
-/// - dim: the dimensions of the target raster
-///
-/// Returns the `RasterWindow` in the target raster.
-pub fn transform_window(win: RasterWindow, t: PixelTransform, dim: RasterDims) -> RasterWindow {
-    let offset = win.0;
-    let size = win.1;
-
-    let t_lt = t.transform_point(&Point2::new(offset.0 as f64, offset.1 as f64));
-    let t_rb = t.transform_point(&Point2::new(
-        offset.0 as f64 + size.0 as f64,
-        offset.1 as f64 + size.1 as f64,
-    ));
-
-    Rect::new((t_lt.x, t_lt.y), (t_rb.x, t_rb.y)).window_from_bounds(dim)
-}
-
-#[cfg(feature = "gdal")]
-/// Compute affine transform to transfer from pixel
-/// coordinates of the first dataset to the second dataset.
-pub fn transform_between(ds_1: &gdal::Dataset, ds_2: &gdal::Dataset) -> anyhow::Result<PixelTransform> {
-    use anyhow::*;
-    let transform_1 = transform_from_dataset(&ds_1);
-    let transform_2 = transform_from_dataset(&ds_2);
-
-    transform_2
-        .try_inverse()
-        .ok_or_else(|| anyhow!("input_b: couldn't invert transform"))
-        .map(|inv| inv * transform_1)
-}
+type ChunkTransform = PixelPixelTransform;
 
 /// Calculate residue of an transform for a pair of offsets.
 /// This is used to succinctly convert from array
@@ -95,46 +54,35 @@ pub fn transform_between(ds_1: &gdal::Dataset, ds_2: &gdal::Dataset) -> anyhow::
 ///
 /// `(J, I) = transform(off_1) - off_2 + transform(j, i)`
 pub fn chunk_transform(
-    transform: &PixelTransform,
-    off_1: Vector2<f64>,
-    off_2: Vector2<f64>,
-) -> PixelTransform {
-    let residue = residue(transform, off_1, off_2);
-
-    let mut transform = transform.clone();
-    transform[(0, 2)] += residue.x;
-    transform[(1, 2)] += residue.y;
-    transform
-}
-
-fn residue(transform: &PixelTransform, off_1: Vector2<f64>, off_2: Vector2<f64>) -> Vector2<f64> {
-    let off_1 = Vector3::new(off_1.x, off_1.y, 0.);
-    let off_2 = Vector3::new(off_2.x, off_2.y, 0.);
-
-    let result = transform * off_1 - off_2;
-    Vector2::new(result.x, result.y)
+    transform: &PixelPixelTransform,
+    off_1: Offset,
+    off_2: Offset,
+) -> ChunkTransform {
+    // zero out xoff and yoff and apply transform to off_1.
+    // subtract off_2 from resulting coord.
+    let residue = AffineTransform::translate(-1., -1.)
+        .compose(transform)
+        .apply(Coord::from(as_f64(off_1)))
+        - Coord::from(as_f64(off_2));
+    // summ resedue to xoff and yoff.
+    AffineTransform::translate(residue.x, residue.y).compose(transform)
 }
 
 /// Converts a [`chunk_transform`] into a function that maps
 /// input (integer) indices to indices on the output raster
 /// if it falls within the given dimension (`dim`), and
 /// otherwise `None`.
-pub fn index_transformer(
-    chunk_t: PixelTransform,
-    dim: RasterDims,
-) -> impl Fn(RasterDims) -> Option<RasterDims> {
+pub fn index_transformer(chunk_t: ChunkTransform, dim: Size) -> impl Fn(Size) -> Option<Size> {
     let (cols, rows) = dim;
 
-    move |(i, j)| {
+    move |indexes| {
         // Transform indices
-        let pt = chunk_t.transform_point(&Point2::new(j as f64, i as f64));
-
+        let pt = chunk_t.apply(Coord::from(as_f64(indexes)));
         if pt.x < 0. || pt.y < 0. {
             return None;
         }
-        let j_2 = pt.x.floor() as usize;
-        let i_2 = pt.y.floor() as usize;
 
+        let (j_2, i_2) = as_usize(pt.x_y());
         if j_2 >= cols || i_2 >= rows {
             None
         } else {
@@ -143,21 +91,14 @@ pub fn index_transformer(
     }
 }
 
-#[cfg(feature = "gdal")]
-#[cfg(test)]
+/* #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::Path;
     use gdal::Dataset;
 
-    fn print_mat3x3(t: &PixelTransform) {
-        for i in 0..3 {
-            eprint!("[");
-            for j in 0..3 {
-                eprint!("{:15.5},", t[(i, j)]);
-            }
-            eprintln!("],")
-        }
+    fn print_mat3x3(t: &AffineTransform) {
+        eprint!("{:?}", t)
     }
 
     #[test]
@@ -184,4 +125,4 @@ mod tests {
         eprintln!("transform chunk: ");
         print_mat3x3(&tchunk);
     }
-}
+} */
