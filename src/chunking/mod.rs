@@ -37,7 +37,7 @@
 //! - **Fixed Padding.** Each chunk may additionally use a
 //! fixed number of rows above and below it.
 
-mod builder;
+pub mod builder;
 mod iters;
 #[cfg(feature = "use-rayon")]
 mod par_iters;
